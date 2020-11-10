@@ -329,7 +329,6 @@ fn do_stuff() -> bool {
     //);
 
     // vendor_id needs some string parsing...
-    // another comment to get git to change
     //get_print_device_property(
     //  hdev_info_set,
     //  &mut device_info_data,
