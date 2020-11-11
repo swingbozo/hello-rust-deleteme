@@ -73,7 +73,8 @@ use winapi::shared::minwindef::{
   TRUE,
   FALSE,
   BOOL,
-  DWORD
+  DWORD,
+  PBYTE
 };
 
 use winapi::shared::winerror::{
@@ -97,7 +98,7 @@ use winapi::um::{
       SetupDiGetClassDevsW,
       SetupDiEnumDeviceInfo,
       SetupDiGetDeviceInstanceIdW,
-      //SetupDiGetDeviceRegistryPropertyW,
+      SetupDiGetDeviceRegistryPropertyW,
       SetupDiDestroyDeviceInfoList
     },
     cfgmgr32::{
@@ -132,7 +133,10 @@ const GUID_DEVINTERFACE_HID:GUID = GUID {
       };
 
 // Appears we need to declare device registry entry property numbers
-//const SDRP_HARDWAREID:DWORD = 0x00000000;
+const SDRP_DEVICEDESC:DWORD = 0x00000000;
+//const SDRP_HARDWAREID:DWORD = 0x00000001;
+const SDRP_MFG:DWORD = 0x0000000B;
+const SDRP_PHYSICAL_DEVICE_OBJECT_NAME:DWORD = 0x0000000E;
 
 fn has_usb_parent(h_dev_inst:DEVINST) -> bool {
   let mut b_rval:bool = false;
@@ -169,7 +173,6 @@ fn has_usb_parent(h_dev_inst:DEVINST) -> bool {
   return b_rval;
 }
 
-#[cfg(unused)]
 fn get_print_device_property (
   hdev_info:HDEVINFO,
   pdev_info_data:PSP_DEVINFO_DATA,
@@ -179,7 +182,7 @@ fn get_print_device_property (
 
   let b_valid:BOOL;
   let last_error:DWORD;
-  let mut required_length;
+  let mut returned_length:DWORD = 0;
   let str_result;
 
   // BUGBUG
@@ -187,34 +190,38 @@ fn get_print_device_property (
   let mut buffer: Vec<u16> = Vec::with_capacity(255);
 
   unsafe {
+    // This is kinda wrong, as we need byte buffers here
+    // not wide char buffers. More bytes is always
+    // good though.
     buffer.set_len(255);
-    
+    let buf_len_in_bytes:DWORD = 255 * size_of::<u16>() as DWORD;
+
     b_valid = SetupDiGetDeviceRegistryPropertyW(
       hdev_info,
       pdev_info_data,
       property,
       std::ptr::null_mut(),
-      buffer.as_mut_ptr(),
-      255,
-      &mut required_length
+      buffer.as_mut_ptr() as PBYTE,
+      buf_len_in_bytes,
+      &mut returned_length
     );
     last_error = GetLastError();
 
-    if b_valid == TRUE {
-      str_result = String::from_utf16_lossy(&buffer[0..required_length as usize]);
+    if b_valid == TRUE && returned_length != 0 {
+      // returned_length is BYTES and we know this is really u16's wide chars
+      returned_length = returned_length / size_of::<u16>() as DWORD;
+      str_result = String::from_utf16_lossy(&buffer[0..returned_length as usize]);
     }
     else {
       str_result = format!("ERROR {}", last_error);
     }
   }
 
-  println!("      property {} {{ {}", property_name, str_result);
- 
+  println!("        property {} {}", property_name, str_result);
+  
 }
 
 fn print_dev_info(hdev_info:HDEVINFO, pdev_info_data:PSP_DEVINFO_DATA) {
-  println!("  HidDevice {{");
-
   let b_valid:BOOL;
   let lasterror:DWORD;
 
@@ -240,9 +247,7 @@ fn print_dev_info(hdev_info:HDEVINFO, pdev_info_data:PSP_DEVINFO_DATA) {
       str_result = format!("ERROR {}", lasterror);
     }
   };
-  println!("    device identifier: {}", str_result);
-
-  println!("  }}");
+  println!("        device identifier: {}", str_result);
 
 }
 
@@ -269,6 +274,7 @@ fn do_stuff() -> bool {
   //println!("Got valid device interface HID classes");
 
   let mut icurrdev = 0;
+  let mut b_print_header = true;
 
   loop {
     // let mut device_info_data:SP_DEVINFO_DATA = mem::uninitialized();
@@ -296,53 +302,95 @@ fn do_stuff() -> bool {
     if cfg!(do_usb_parent) {
       // Valid device_info_data so let's check for a USB parent
       if !has_usb_parent(device_info_data.DevInst) {
-        // No USB parent
+        // No USB parent go to next device
         icurrdev += 1;
         continue;
       }
 
       // valid device info
-      // parent is USB device
-      // display and get information as appropriate.
-
-      println!("hid devices with USB parent: {{");
+      // parent is USB device if compiled that way
+      // get and display information as appropriate.
+      if b_print_header == true {
+        println!("HID Devices with USB parent: {{");
+        b_print_header = false;
+      }
     }
     else
     {
       // valid device info
-      // display and get information as appropriate.
-
-      println!("hid devices: {{");
+      // get and display information as appropriate.
+      if b_print_header == true {
+        println!("HID Devices: {{");
+        b_print_header = false;
+      }
     }
+
+    // Start of dumping individual device
+    println!("    HID Device {{");
 
     // print the single device info stuff
     print_dev_info(hdev_info_set, &mut device_info_data);
 
-    // print device specific information
-
+    #[cfg(unused)] {
+    // TODO Parse out and display product id orrectly
+    // here just as a place holder for the time being
     // product_id is needs some string parsing...
-    //get_print_device_property(
-    //  hdev_info_set,
-    //  &mut device_info_data,
-    //  SDRP_HARDWAREID,
-    //  String::from("product_id: ")
-    //);
+    get_print_device_property(
+      hdev_info_set,
+      &mut device_info_data,
+      SDRP_HARDWAREID,
+      String::from("product_id parse from: ")
+    );
 
+    // TODO Parse out and display hardware id correctly
+    // here just as a place holder for the time being
+    // product_id is needs some string parsing...
     // vendor_id needs some string parsing...
-    //get_print_device_property(
-    //  hdev_info_set,
-    //  &mut device_info_data,
-    //  SDRP_HARDWAREID,
-    //  String::from("vendor_id: ")
-    //);
+    get_print_device_property(
+      hdev_info_set,
+      &mut device_info_data,
+      SDRP_HARDWAREID,
+      String::from("vendor_id parse from: ")
+    );
+    };
 
+    get_print_device_property(
+      hdev_info_set,
+      &mut device_info_data,
+      SDRP_MFG,
+      String::from("manufacturer: ")
+    );
+
+    get_print_device_property(
+      hdev_info_set,
+      &mut device_info_data,
+      SDRP_DEVICEDESC,
+      String::from("product_string: ")
+    );
+
+    get_print_device_property(
+      hdev_info_set,
+      &mut device_info_data,
+      SDRP_PHYSICAL_DEVICE_OBJECT_NAME,
+      String::from("pdo_name: ")
+    );
+
+    // done with this device id and properties, now on to interfaces
+    
     // TODO
     // go through and print each interface here...
+
+  
+    // and close off this device
+    println!("    }}");
 
     // Now go to the next device
     icurrdev += 1;
 
   }
+
+  // and close off the entire thing
+  println!("}}");
 
   unsafe {
     if hdev_info_set != INVALID_HANDLE_VALUE {
